@@ -1,0 +1,750 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ใบงาน: สถิติจากเกม Pixel Art Collector</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Sarabun', sans-serif;
+            background-color: #f3f4f6;
+            color: #1f2937;
+        }
+        
+        /* สไตล์สำหรับช่อง input และ textarea */
+        input[type="text"], textarea {
+            width: 100%;
+            border: 1px dashed #9ca3af;
+            background-color: #f9fafb;
+            padding: 8px 12px;
+            border-radius: 6px;
+            transition: all 0.2s;
+            resize: vertical;
+        }
+        input.text-center { text-align: center; }
+        
+        input[type="text"]:focus, textarea:focus {
+            outline: none;
+            border-color: #3b82f6;
+            background-color: #ffffff;
+            border-style: solid;
+            box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+        }
+
+        /* สำหรับการสั่งพิมพ์ (Print) */
+        @media print {
+            body { background-color: white; }
+            .no-print { display: none !important; }
+            .print-container { box-shadow: none !important; margin: 0 !important; padding: 0 !important; max-width: 100% !important; border: none !important; }
+            input, textarea { border: none !important; background: transparent !important; border-bottom: 1px dotted black !important; border-radius: 0 !important; resize: none !important; }
+            .histogram-cell.active { background-color: #9ca3af !important; border-color: #9ca3af !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+            .hide-grid .histogram-cell.active { box-shadow: 0 0 0 1px #9ca3af !important; }
+            canvas { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+        }
+
+        /* โครงสร้าง Grid ของ Histogram */
+        #histogram-wrapper {
+            position: relative;
+            padding-bottom: 20px;
+        }
+
+        #histogram-container {
+            display: grid;
+            /* เปลี่ยนคอลัมน์เป็น 7 ช่อง: (แกนY) + (เว้นซ้าย) + (แท่งข้อมูล 1-5) + (เว้นขวา) */
+            grid-template-columns: 40px repeat(7, minmax(40px, 80px));
+            justify-content: center;
+            gap: 0;
+            background-color: white;
+            padding-top: 1px;
+            padding-right: 1px;
+            position: relative;
+            margin: 0 auto;
+        }
+
+        .y-label {
+            display: flex;
+            align-items: center;
+            justify-content: flex-end;
+            padding-right: 8px;
+            font-size: 0.875rem;
+            color: #4b5563;
+        }
+
+        /* เพิ่มเส้นกริดแนวตั้ง 5 ช่องย่อยด้วย Gradient และขอบหลัก */
+        .histogram-cell, .spacer-cell {
+            border-top: 1px solid rgba(156, 163, 175, 0.5); /* เส้นกริดแนวนอนย่อย */
+            border-right: 2px solid #9ca3af; /* เส้นกริดแนวตั้งหลัก (แบ่งคอลัมน์) */
+            background-color: transparent;
+            cursor: pointer;
+            transition: all 0.1s;
+            aspect-ratio: 5 / 1; 
+            position: relative;
+            /* สร้างเส้นกริดแนวตั้งย่อย 5 ช่องเล็ก ทำให้สี่เหลี่ยมใหญ่มี 25 ช่องเล็ก */
+            background-image: repeating-linear-gradient(to right, transparent, transparent calc(20% - 1px), rgba(156, 163, 175, 0.5) calc(20% - 1px), rgba(156, 163, 175, 0.5) 20%);
+        }
+
+        .histogram-cell.major-line, .spacer-cell.major-line {
+            border-top: 2px solid #9ca3af; /* เส้นกริดแนวนอนหลัก ทุกๆ 5 หน่วย */
+        }
+
+        .hide-grid .histogram-cell { border-top-color: transparent; border-right-color: transparent; background-image: none; }
+        .hide-grid .histogram-cell.major-line { border-top-color: transparent; }
+        
+        /* ซ่อนขอบเส้น เมื่อผู้ใช้กดซ่อนกริด */
+        .hide-grid .spacer-cell { border-top-color: transparent !important; border-right-color: transparent !important; background-image: none; }
+        
+        .histogram-cell:hover { background-color: #dbeafe; }
+        
+        /* สไตล์เมื่อระบายสี */
+        .histogram-cell.active { 
+            background-color: #3b82f6; 
+            border-top-color: rgba(255, 255, 255, 0.2); 
+            border-right-color: #2563eb;
+            background-image: repeating-linear-gradient(to right, transparent, transparent calc(20% - 1px), rgba(255, 255, 255, 0.15) calc(20% - 1px), rgba(255, 255, 255, 0.15) 20%);
+        }
+        .histogram-cell.major-line.active {
+            border-top-color: #2563eb; 
+        }
+        
+        /* สไตล์เมื่อระบายสี + ซ่อนกริด */
+        .hide-grid .histogram-cell.active {
+            background-color: #3b82f6 !important;
+            border-top-color: #3b82f6 !important;
+            border-right-color: #3b82f6 !important;
+            box-shadow: none !important;
+            background-image: none;
+        }
+        
+        /* Drawing Canvas Layer */
+        #drawCanvas {
+            position: absolute;
+            top: 10px;
+            left: 52px;
+            z-index: 10;
+        }
+        
+        .pointer-events-none { pointer-events: none; }
+        .pointer-events-auto { pointer-events: auto; cursor: crosshair; }
+    </style>
+</head>
+<body class="p-4 md:p-8 flex justify-center">
+
+    <div class="print-container w-full max-w-4xl bg-white p-8 md:p-12 rounded-xl shadow-lg border border-gray-200">
+        
+        <!-- Header Section -->
+        <header class="mb-8 border-b-2 border-gray-800 pb-6 text-center relative">
+            <button onclick="saveAsImage()" class="no-print absolute top-0 right-0 bg-blue-600 text-white px-4 py-2 rounded shadow hover:bg-blue-700 transition flex items-center gap-2">
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
+                บันทึกรูปภาพ
+            </button>
+            <h1 class="text-3xl font-bold text-gray-900 mb-2">ใบงาน: สถิติจากเกม Pixel Art Collector</h1>
+            <p class="text-gray-600">เรื่อง การแจกแจงความถี่ ฮิสโทแกรม และรูปหลายเหลี่ยมความถี่</p>
+            
+            <div class="mt-6 flex flex-wrap justify-center gap-4 text-left">
+                <div class="flex items-center gap-2">
+                    <label class="font-semibold">ชื่อ-สกุล:</label>
+                    <input type="text" class="w-64" placeholder="พิมพ์ชื่อ-สกุล...">
+                </div>
+                <div class="flex items-center gap-2">
+                    <label class="font-semibold">ชั้น:</label>
+                    <input type="text" class="w-24 text-center" placeholder="ม.../...">
+                </div>
+                <div class="flex items-center gap-2">
+                    <label class="font-semibold">เลขที่:</label>
+                    <input type="text" class="w-20 text-center" placeholder="...">
+                </div>
+            </div>
+        </header>
+
+        <!-- ส่วนที่ 1: ตารางแจกแจงความถี่ -->
+        <section class="mb-10">
+            <h2 class="text-xl font-bold mb-4 flex items-center gap-2 text-blue-800">
+                <span class="bg-blue-800 text-white w-8 h-8 rounded-full flex items-center justify-center text-sm shadow">1</span> 
+                ตารางแจกแจงความถี่
+            </h2>
+            <p class="text-gray-600 mb-3 text-sm">คำชี้แจง: ให้นำข้อมูลน้ำหนักไอเทมที่รวบรวมได้จากเกม มาเติมลงในตารางให้สมบูรณ์</p>
+            
+            <div class="overflow-hidden rounded-lg border border-gray-300 shadow-sm">
+                <table class="w-full text-center">
+                    <thead class="bg-gray-100 border-b border-gray-300 font-semibold text-gray-700">
+                        <tr>
+                            <th class="p-3 w-1/5">ช่วงน้ำหนัก (กรัม)</th>
+                            <th class="p-3 w-1/5">ขอบล่าง</th>
+                            <th class="p-3 w-1/5">ขอบบน</th>
+                            <th class="p-3 w-1/5">จุดกึ่งกลางชั้น</th>
+                            <th class="p-3 w-1/5 border-l-2 border-gray-300 bg-blue-50/50 text-blue-800">จำนวนไอเทม (ชิ้น)</th>
+                        </tr>
+                    </thead>
+                    <tbody class="divide-y divide-gray-200" id="freq-table-body">
+                        <!-- สร้าง 5 ชั้นข้อมูล -->
+                        <tr>
+                            <td class="p-2"><input type="text" class="text-center font-medium" placeholder="เช่น 1 - 10"></td>
+                            <td class="p-2"><input type="text" id="tb-lower-1" class="text-center bg-transparent focus:bg-white w-full" placeholder="..."></td>
+                            <td class="p-2"><input type="text" id="tb-upper-1" class="text-center bg-transparent focus:bg-white w-full" placeholder="..."></td>
+                            <td class="p-2"><input type="text" class="text-center bg-transparent focus:bg-white w-full" placeholder="..."></td>
+                            <td class="p-2 border-l-2 border-gray-300 bg-blue-50/30"><input type="text" class="text-center font-bold text-blue-700 bg-transparent w-full" placeholder="0"></td>
+                        </tr>
+                        <tr>
+                            <td class="p-2"><input type="text" class="text-center font-medium" placeholder="..."></td>
+                            <td class="p-2"><input type="text" id="tb-lower-2" class="text-center bg-transparent focus:bg-white w-full" placeholder="..."></td>
+                            <td class="p-2"><input type="text" id="tb-upper-2" class="text-center bg-transparent focus:bg-white w-full" placeholder="..."></td>
+                            <td class="p-2"><input type="text" class="text-center bg-transparent focus:bg-white w-full" placeholder="..."></td>
+                            <td class="p-2 border-l-2 border-gray-300 bg-blue-50/30"><input type="text" class="text-center font-bold text-blue-700 bg-transparent w-full" placeholder="0"></td>
+                        </tr>
+                        <tr>
+                            <td class="p-2"><input type="text" class="text-center font-medium" placeholder="..."></td>
+                            <td class="p-2"><input type="text" id="tb-lower-3" class="text-center bg-transparent focus:bg-white w-full" placeholder="..."></td>
+                            <td class="p-2"><input type="text" id="tb-upper-3" class="text-center bg-transparent focus:bg-white w-full" placeholder="..."></td>
+                            <td class="p-2"><input type="text" class="text-center bg-transparent focus:bg-white w-full" placeholder="..."></td>
+                            <td class="p-2 border-l-2 border-gray-300 bg-blue-50/30"><input type="text" class="text-center font-bold text-blue-700 bg-transparent w-full" placeholder="0"></td>
+                        </tr>
+                        <tr>
+                            <td class="p-2"><input type="text" class="text-center font-medium" placeholder="..."></td>
+                            <td class="p-2"><input type="text" id="tb-lower-4" class="text-center bg-transparent focus:bg-white w-full" placeholder="..."></td>
+                            <td class="p-2"><input type="text" id="tb-upper-4" class="text-center bg-transparent focus:bg-white w-full" placeholder="..."></td>
+                            <td class="p-2"><input type="text" class="text-center bg-transparent focus:bg-white w-full" placeholder="..."></td>
+                            <td class="p-2 border-l-2 border-gray-300 bg-blue-50/30"><input type="text" class="text-center font-bold text-blue-700 bg-transparent w-full" placeholder="0"></td>
+                        </tr>
+                        <tr>
+                            <td class="p-2"><input type="text" class="text-center font-medium" placeholder="..."></td>
+                            <td class="p-2"><input type="text" id="tb-lower-5" class="text-center bg-transparent focus:bg-white w-full" placeholder="..."></td>
+                            <td class="p-2"><input type="text" id="tb-upper-5" class="text-center bg-transparent focus:bg-white w-full" placeholder="..."></td>
+                            <td class="p-2"><input type="text" class="text-center bg-transparent focus:bg-white w-full" placeholder="..."></td>
+                            <td class="p-2 border-l-2 border-gray-300 bg-blue-50/30"><input type="text" class="text-center font-bold text-blue-700 bg-transparent w-full" placeholder="0"></td>
+                        </tr>
+                    </tbody>
+                    <tfoot class="bg-gray-100 border-t-2 border-gray-300 font-bold">
+                        <tr>
+                            <td colspan="4" class="p-3 text-right pr-6">รวมจำนวนไอเทมทั้งหมด (N) =</td>
+                            <td class="p-3 border-l-2 border-gray-300"><input type="text" class="text-center bg-white border border-gray-300 w-full" placeholder="0"></td>
+                        </tr>
+                    </tfoot>
+                </table>
+            </div>
+        </section>
+
+        <!-- ส่วนที่ 2: สร้างฮิสโทแกรมและวาดเส้น -->
+        <section class="mb-10">
+            <div class="flex flex-col md:flex-row justify-between items-start md:items-end mb-4 gap-4">
+                <div>
+                    <h2 class="text-xl font-bold flex items-center gap-2 text-green-800">
+                        <span class="bg-green-800 text-white w-8 h-8 rounded-full flex items-center justify-center text-sm shadow">2</span> 
+                        แผนภาพฮิสโทแกรม และ รูปหลายเหลี่ยมความถี่
+                    </h2>
+                    <p class="text-gray-600 mt-1 text-sm leading-relaxed">
+                        คำชี้แจง: 1. เลือกแถบเครื่องมือ <strong class="text-blue-600">"ระบายสี"</strong> แล้วคลิกบนตารางเพื่อสร้างแท่งฮิสโทแกรมตามตารางความถี่<br>
+                        <span class="ml-[4.5rem]">2. เลือกแถบเครื่องมือ <strong class="text-red-500">"จุดและลากเส้น"</strong> จากนั้นคลิกที่จุดกึ่งกลางยอดแท่งเพื่อสร้างรูปหลายเหลี่ยมความถี่</span>
+                    </p>
+                </div>
+                
+                <!-- แผงควบคุมเครื่องมือวาด -->
+                <div class="no-print flex flex-wrap bg-gray-100 p-1.5 rounded-lg border border-gray-200 shadow-inner gap-y-2 items-center">
+                    <button id="btn-mode-fill" onclick="setMode('fill')" class="flex items-center gap-1 px-3 py-1.5 rounded-md bg-white shadow-sm font-semibold text-blue-600 border border-gray-200">
+                        🟦 ระบายสี
+                    </button>
+                    <button id="btn-mode-draw" onclick="setMode('draw')" class="flex items-center gap-1 px-3 py-1.5 rounded-md text-gray-500 hover:text-gray-800 hover:bg-white transition-all">
+                        📍 จุดและลากเส้น
+                    </button>
+                    <div class="w-px h-6 bg-gray-300 mx-1 hidden md:block"></div>
+                    <button id="btn-toggle-grid" onclick="toggleGrid()" class="flex items-center gap-1 px-3 py-1.5 rounded-md text-gray-700 hover:bg-white transition-all text-sm font-medium">
+                        <span id="grid-icon">🙈</span> ซ่อนกริด
+                    </button>
+                    <button onclick="clearPolygon()" class="px-2 py-1.5 text-sm text-orange-500 hover:bg-orange-50 rounded" title="ลบเฉพาะเส้นที่วาด">ลบเส้น</button>
+                    <button onclick="clearBars()" class="px-2 py-1.5 text-sm text-orange-500 hover:bg-orange-50 rounded" title="ลบเฉพาะกราฟแท่ง">ล้างสี</button>
+                    <button onclick="resetGraph()" class="px-2 py-1.5 text-sm font-bold text-red-600 hover:bg-red-100 rounded transition-colors" title="รีเซ็ตกราฟและสเกลทั้งหมด">🔄 รีเซ็ต</button>
+                    
+                    <!-- ส่วนที่เพิ่มเข้ามา: เครื่องมือปรับสเกลแกน Y -->
+                    <div class="w-px bg-gray-300 mx-1"></div>
+                    <div class="flex items-center gap-2 px-2" title="ปรับสเกลแกน Y ให้พอกับข้อมูลของคุณ">
+                        <label class="text-xs text-gray-700 font-semibold">แกน Y สูงสุด:</label>
+                        <input type="number" id="input-max-freq" value="15" min="5" max="100" class="w-16 h-8 text-center text-sm border border-gray-300 rounded focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 bg-white">
+                        <button onclick="updateMaxFreq()" class="px-3 py-1.5 text-xs font-medium bg-gray-800 text-white hover:bg-gray-700 rounded transition-colors">อัปเดต</button>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="relative max-w-4xl mx-auto pt-10 pl-4 md:pl-8">
+                <!-- Label Y Axis (ปรับให้อ่านง่าย แนวนอนอยู่ด้านบน) -->
+                <div class="absolute left-0 md:left-4 -top-2 text-base md:text-lg font-bold text-gray-900 tracking-wider whitespace-nowrap flex items-center gap-2">
+                    <span class="text-xs">▲</span> จำนวนไอเทม (ชิ้น)
+                </div>
+
+                <div id="histogram-wrapper">
+                    <!-- Histogram Grid Base (แกน X จะถูกสร้างรวมในนี้อัตโนมัติ) -->
+                    <div id="histogram-container"></div>
+                    <!-- Drawing Canvas Overlay -->
+                    <canvas id="drawCanvas" class="pointer-events-none absolute"></canvas>
+                </div>
+
+                <!-- Label X Axis -->
+                <div class="text-center mt-6 text-base md:text-lg font-bold text-gray-900 flex justify-center items-center gap-2">
+                    ช่วงน้ำหนักของไอเทม (กรัม) <span class="text-xs">▶</span>
+                </div>
+            </div>
+        </section>
+
+        <!-- ส่วนที่ 3: ตอบคำถาม -->
+        <section>
+            <h2 class="text-xl font-bold mb-4 flex items-center gap-2 text-purple-800">
+                <span class="bg-purple-800 text-white w-8 h-8 rounded-full flex items-center justify-center text-sm shadow">3</span> 
+                วิเคราะห์ข้อมูล
+            </h2>
+            
+            <div class="space-y-6 bg-purple-50/50 p-6 rounded-lg border border-purple-100">
+                <!-- คำถามข้อ 1 -->
+                <div>
+                    <label class="block font-medium text-gray-800 mb-2">
+                        1) แผนภาพฮิสโทแกรมที่ได้มีรูปร่างเป็นอย่างไร? <span class="text-sm font-normal text-gray-500">(เช่น แบบสมมาตร, เบ้ขวา, เบ้ซ้าย)</span>
+                    </label>
+                    <textarea rows="2" placeholder="พิมพ์คำตอบของคุณที่นี่..."></textarea>
+                </div>
+
+                <!-- คำถามข้อ 2 -->
+                <div>
+                    <label class="block font-medium text-gray-800 mb-2">
+                        2) ไอเทมส่วนใหญ่มีน้ำหนักอยู่ในช่วงใด?
+                    </label>
+                    <input type="text" placeholder="พิมพ์คำตอบของคุณที่นี่...">
+                </div>
+
+                <!-- คำถามข้อ 3 -->
+                <div>
+                    <label class="block font-medium text-gray-800 mb-2">
+                        3) สมมุติ ร้านค้าแห่งหนึ่งรับซื้อไอเทมที่มีน้ำหนัก<span class="underline font-bold text-red-600">มากกว่า 10 กรัม</span> จะสามารถนำไปขายได้กี่ชิ้น?
+                    </label>
+                    <textarea rows="2" placeholder="แสดงวิธีคิดและคำตอบที่นี่..."></textarea>
+                </div>
+            </div>
+        </section>
+
+    </div>
+
+    <script>
+        // --- การตั้งค่า Histogram Grid ---
+        let maxFrequency = 15; 
+        const numClasses = 5; 
+        let isGridVisible = true;
+
+        // ฟังก์ชันซ่อน/แสดง กริด
+        function toggleGrid() {
+            const container = document.getElementById('histogram-container');
+            const btnNode = document.getElementById('btn-toggle-grid');
+            isGridVisible = !isGridVisible;
+            
+            if (isGridVisible) {
+                container.classList.remove('hide-grid');
+                btnNode.innerHTML = `<span id="grid-icon">🙈</span> ซ่อนกริด`;
+            } else {
+                container.classList.add('hide-grid');
+                btnNode.innerHTML = `<span id="grid-icon">👁️</span> แสดงกริด`;
+            }
+        }
+
+        // ฟังก์ชันสำหรับรับค่าและปรับสเกลแกน Y ใหม่
+        function updateMaxFreq() {
+            const input = document.getElementById('input-max-freq');
+            let newVal = parseInt(input.value);
+            
+            // ป้องกันไม่ให้ผู้ใช้ใส่ค่าน้อยหรือมากเกินไปจนกราฟแสดงผลเพี้ยน
+            if (isNaN(newVal) || newVal < 5) newVal = 5;
+            if (newVal > 100) newVal = 100; 
+            
+            // ปรับค่าให้เป็นจำนวนเต็มทวีคูณของ 5 เสมอ เพื่อให้กราฟลงล็อกสี่เหลี่ยมพอดี
+            newVal = Math.ceil(newVal / 5) * 5;
+            
+            input.value = newVal;
+            maxFrequency = newVal;
+            
+            // ล้างเส้นและสีเก่าออก ก่อนวาดกริดใหม่
+            clearBars();
+            clearPolygon();
+            initHistogram();
+        }
+
+        function initHistogram() {
+            const container = document.getElementById('histogram-container');
+            container.innerHTML = '';
+
+            // สร้างแกน Y และช่อง Grid
+            for (let y = maxFrequency; y >= 1; y--) {
+                const yLabel = document.createElement('div');
+                yLabel.className = 'y-label border-r-2 border-gray-700 relative';
+                // แสดงตัวเลขเฉพาะช่องที่หารด้วย 5 ลงตัว โดยจัดให้อยู่ตรงกับเส้นอย่างแม่นยำ
+                if (y % 5 === 0) {
+                    yLabel.innerHTML = `<span class="absolute -top-[10px] right-2 leading-none font-bold text-gray-800 bg-white px-1 z-10">${y}</span>`;
+                }
+                container.appendChild(yLabel);
+
+                // เพิ่มช่องว่าง 1 หน่วยก่อนเริ่มฮิสโทแกรม
+                const spacer = document.createElement('div');
+                spacer.className = 'spacer-cell bg-white';
+                if (y % 5 === 0) spacer.classList.add('major-line'); 
+                container.appendChild(spacer);
+
+                // สร้างเซลล์ข้อมูล 5 คอลัมน์
+                for (let x = 1; x <= numClasses; x++) {
+                    const cell = document.createElement('div');
+                    cell.className = 'histogram-cell';
+                    if (y % 5 === 0) cell.classList.add('major-line'); 
+                    cell.dataset.col = x;
+                    cell.dataset.row = y;
+                    cell.onclick = () => { if(currentMode === 'fill') fillBar(x, y); };
+                    container.appendChild(cell);
+                }
+
+                // สร้างช่องว่างด้านขวาสุด (เผื่อไว้ให้ลากเส้นตกที่ความถี่ 0)
+                const rightSpacer = document.createElement('div');
+                rightSpacer.className = 'spacer-cell right-spacer bg-white';
+                if (y % 5 === 0) rightSpacer.classList.add('major-line');
+                container.appendChild(rightSpacer);
+            }
+
+            // มุมซ้ายล่างว่างไว้สำหรับให้เส้นแกนมาบรรจบกัน พร้อมใส่เลข 0 ให้ตรงจุดตัดพอดี
+            const emptyCorner = document.createElement('div');
+            emptyCorner.className = 'border-r-2 border-t-2 border-gray-700 relative';
+            emptyCorner.innerHTML = `<span class="absolute -top-[12px] -right-[5px] leading-none font-bold text-gray-800 bg-white px-1 z-10">0</span>`;
+            container.appendChild(emptyCorner);
+
+            // แกน X ช่องว่างที่ 1 (เว้นระยะ 1 หน่วย และมีเส้นย่นแกน)
+            const xSpacer = document.createElement('div');
+            xSpacer.className = 'border-t-2 border-gray-700 relative';
+            xSpacer.innerHTML = `
+                <div class="absolute left-1/2 -top-[12px] -translate-x-1/2 w-[24px] h-[24px] bg-white flex items-center justify-center z-20" title="เส้นย่นแกน">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="#374151" stroke-width="2.5" class="w-full h-full">
+                        <polyline points="2,14 8,6 16,22 22,14"></polyline>
+                    </svg>
+                </div>
+            `;
+            container.appendChild(xSpacer);
+
+            // แกน X ช่องรับข้อมูล 5 ช่วง (เริ่มคอลัมน์ที่ 3 กินพื้นที่ 5 ช่อง)
+            const xAxisLabelsContainer = document.createElement('div');
+            xAxisLabelsContainer.style.gridColumn = '3 / span 5'; 
+            xAxisLabelsContainer.className = 'relative border-t-2 border-gray-700 h-10'; 
+            
+            // สร้างป้ายแสดงตัวเลขขอบล่าง-ขอบบน 6 จุด (ดึงข้อมูลมาจากตารางอัตโนมัติ)
+            for(let i=0; i<=numClasses; i++) {
+                const label = document.createElement('div');
+                label.id = `graph-bound-${i}`;
+                label.className = 'absolute top-2 w-12 md:w-16 text-center text-xs md:text-sm font-bold text-gray-800 transform -translate-x-1/2';
+                label.style.left = `${(i / numClasses) * 100}%`;
+                // กำหนดค่าเริ่มต้นไว้หลวมๆ ก่อนซิงค์
+                label.innerText = i === 0 ? 'ล่าง' : 'บน';
+                xAxisLabelsContainer.appendChild(label);
+                
+                // ขีดแบ่งแกน X (Tick marks)
+                const tick = document.createElement('div');
+                tick.className = 'absolute top-0 w-px h-2 bg-gray-700 transform -translate-x-1/2';
+                tick.style.left = `${(i / numClasses) * 100}%`;
+                xAxisLabelsContainer.appendChild(tick);
+            }
+            
+            container.appendChild(xAxisLabelsContainer);
+
+            // เส้นแกน X ด้านขวาสุด
+            const rightSpacerX = document.createElement('div');
+            rightSpacerX.className = 'border-t-2 border-gray-700 relative';
+            container.appendChild(rightSpacerX);
+            
+            // ดึงค่าล่าสุดจากตารางมาแสดงบนกราฟทันที
+            syncTableToGraph();
+            
+            setTimeout(resizeCanvas, 100);
+        }
+
+        // ฟังก์ชันระบายสีแท่งกราฟ
+        function fillBar(colIndex, clickedY) {
+            const cells = document.querySelectorAll(`.histogram-cell[data-col="${colIndex}"]`);
+            
+            cells.forEach(cell => {
+                const rowVal = parseInt(cell.dataset.row);
+                if (rowVal <= clickedY) {
+                    cell.classList.add('active');
+                } else {
+                    cell.classList.remove('active');
+                }
+            });
+        }
+
+        function clearBars() {
+            document.querySelectorAll('.histogram-cell').forEach(cell => cell.classList.remove('active'));
+        }
+
+        // ฟังก์ชันรีเซ็ตกราฟทั้งหมด (ล้างสี, ลบเส้น, และคืนค่าสเกลเป็น 15)
+        function resetGraph() {
+            clearBars();
+            clearPolygon();
+            const input = document.getElementById('input-max-freq');
+            if (parseInt(input.value) !== 15) {
+                input.value = 15;
+                maxFrequency = 15;
+                initHistogram();
+            }
+        }
+
+        // --- ระบบจุดและวาดเส้นบน Canvas (Point-and-Connect) ---
+        const canvas = document.getElementById('drawCanvas');
+        const ctx = canvas.getContext('2d');
+        let currentMode = 'fill'; 
+        let polygonPoints = [{ rx: 0, ry: 1 }]; // กำหนดจุด 1 จุด เริ่มต้นที่ (0,0) เสมอ
+
+        function resizeCanvas() {
+            const wrapper = document.getElementById('histogram-wrapper');
+            // ครอบคลุมพื้นที่กริดทั้งหมดอย่างแม่นยำ โดยแยกฝั่งซ้ายและขวาให้ถูกต้อง
+            const leftSpacers = document.querySelectorAll('.spacer-cell:not(.right-spacer)'); 
+            const rightSpacers = document.querySelectorAll('.right-spacer'); 
+            
+            if(leftSpacers.length > 0 && rightSpacers.length > 0 && wrapper) {
+                const wrapperRect = wrapper.getBoundingClientRect();
+                
+                // คำนวณขอบเขตของกราฟจากช่องซ้ายบนสุด ถึงช่องขวาล่างสุด
+                const topLeftRect = leftSpacers[0].getBoundingClientRect();
+                const bottomLeftRect = leftSpacers[leftSpacers.length - 1].getBoundingClientRect();
+                const bottomRightRect = rightSpacers[rightSpacers.length - 1].getBoundingClientRect();
+                
+                canvas.style.left = (topLeftRect.left - wrapperRect.left) + 'px';
+                canvas.style.top = (topLeftRect.top - wrapperRect.top) + 'px';
+                
+                canvas.width = bottomRightRect.right - bottomLeftRect.left; 
+                canvas.height = bottomLeftRect.bottom - topLeftRect.top; 
+                
+                drawPolygon(); 
+            }
+        }
+
+        // จัดการเมื่อย่อขยายหน้าจอ
+        window.addEventListener('resize', () => {
+            resizeCanvas();
+        });
+
+        // ฟังก์ชันสลับเครื่องมือ
+        function setMode(mode) {
+            currentMode = mode;
+            const btnFill = document.getElementById('btn-mode-fill');
+            const btnDraw = document.getElementById('btn-mode-draw');
+            
+            if (mode === 'draw') {
+                canvas.classList.remove('pointer-events-none');
+                canvas.classList.add('pointer-events-auto');
+                
+                btnDraw.className = "flex items-center gap-1 px-3 py-1.5 rounded-md bg-white shadow-sm font-semibold text-red-600 border border-gray-200";
+                btnFill.className = "flex items-center gap-1 px-3 py-1.5 rounded-md text-gray-500 hover:text-gray-800 hover:bg-white transition-all";
+            } else {
+                canvas.classList.add('pointer-events-none');
+                canvas.classList.remove('pointer-events-auto');
+                
+                btnFill.className = "flex items-center gap-1 px-3 py-1.5 rounded-md bg-white shadow-sm font-semibold text-blue-600 border border-gray-200";
+                btnDraw.className = "flex items-center gap-1 px-3 py-1.5 rounded-md text-gray-500 hover:text-gray-800 hover:bg-white transition-all";
+            }
+        }
+
+        // ฟังก์ชันเก็บค่าจุดที่คลิก
+        function handleCanvasClick(e) {
+            if (currentMode !== 'draw') return;
+            
+            const rect = canvas.getBoundingClientRect();
+            // รองรับทั้งเมาส์และทัชสกรีน
+            const clientX = e.clientX || (e.touches && e.touches[0].clientX);
+            const clientY = e.clientY || (e.touches && e.touches[0].clientY);
+            
+            if(!clientX || !clientY) return;
+
+            const x = clientX - rect.left;
+            const y = clientY - rect.top;
+            
+            const totalCols = numClasses + 2; // (ซ้าย 1 + ข้อมูล 5 + ขวา 1) = 7 คอลัมน์
+            const colWidth = canvas.width / totalCols;
+            const rowHeight = canvas.height / maxFrequency;
+            
+            // แก้ไข: แบ่งความละเอียดช่องละ 10 ส่วน (ทุกๆ 10%)
+            // ทำให้สามารถ Snap ลงบน "เส้นกริดแนวตั้งหลัก/ย่อย" (0, 20, 40, 60, 80, 100%) และ "จุดกึ่งกลางชั้น" (50%) ได้อย่างสมบูรณ์
+            const snapStepX = colWidth / 10;
+            let snappedX = Math.round(x / snapStepX) * snapStepX;
+            
+            // ล็อคแกน Y เป็นจำนวนเต็ม
+            let clickedRow = Math.round((canvas.height - y) / rowHeight);
+            let snappedY = canvas.height - (clickedRow * rowHeight);
+
+            // ป้องกันจุดหลุดออกนอก Canvas
+            snappedX = Math.max(0, Math.min(canvas.width, snappedX));
+            snappedY = Math.max(0, Math.min(canvas.height, snappedY));
+
+            // เก็บพิกัดเป็น "สัดส่วน" เพื่อให้เส้นไม่เบี้ยวเวลาย่อขยายหน้าจอ
+            const rx = snappedX / canvas.width;
+            const ry = snappedY / canvas.height;
+
+            // ตรวจสอบว่ามีจุดนี้อยู่แล้วหรือไม่ (แก้บั๊คจุดซ้อน)
+            const existingIndex = polygonPoints.findIndex(p => Math.abs(p.rx - rx) < 0.01 && Math.abs(p.ry - ry) < 0.01);
+            
+            if (existingIndex !== -1) {
+                // ถ้าคลิกซ้ำจุดเดิม และไม่ใช่จุดกำเนิด (0,0) ให้ลบจุดนั้นออก (เปิด-ปิดจุดได้)
+                if (rx !== 0 || ry !== 1) {
+                    polygonPoints.splice(existingIndex, 1);
+                }
+            } else {
+                polygonPoints.push({ rx, ry });
+            }
+
+            // *** เรียงลำดับจุดจากซ้ายไปขวาเสมอ ***
+            // ทำให้เมื่อมีจุดสองจุด เส้นจะถูกลากเชื่อมกันโดยอัตโนมัติอย่างถูกต้อง
+            polygonPoints.sort((a, b) => a.rx - b.rx);
+
+            drawPolygon();
+        }
+
+        // ฟังก์ชันวาดเส้นเชื่อมจุดทั้งหมด
+        function drawPolygon() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            
+            if (polygonPoints.length === 0) return;
+
+            // สไตล์ของเส้น
+            ctx.lineWidth = 3;
+            ctx.lineCap = 'round';
+            ctx.lineJoin = 'round';
+            ctx.strokeStyle = '#ef4444'; // สีแดง
+            
+            // วาดเส้นเชื่อมจุด
+            ctx.beginPath();
+            for (let i = 0; i < polygonPoints.length; i++) {
+                // คำนวณพิกัดกลับคืนมาจากสัดส่วน
+                const px = polygonPoints[i].rx * canvas.width;
+                const py = polygonPoints[i].ry * canvas.height;
+                
+                if (i === 0) ctx.moveTo(px, py);
+                else ctx.lineTo(px, py);
+            }
+            ctx.stroke();
+            
+            // วาดจุดกลมๆ เน้นตำแหน่งที่คลิก
+            ctx.fillStyle = '#b91c1c'; // สีแดงเข้ม
+            for (let i = 0; i < polygonPoints.length; i++) {
+                const px = polygonPoints[i].rx * canvas.width;
+                const py = polygonPoints[i].ry * canvas.height;
+                
+                ctx.beginPath();
+                ctx.arc(px, py, 5, 0, Math.PI * 2);
+                ctx.fill();
+            }
+        }
+
+        function clearPolygon() {
+            polygonPoints = [{ rx: 0, ry: 1 }]; // ลบเส้นออก แต่เหลือจุดกำเนิด (0,0) ไว้
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            drawPolygon(); // วาดจุด (0,0) กลับมา
+        }
+
+        // Events สำหรับการคลิกเพิ่มจุด
+        canvas.addEventListener('click', handleCanvasClick);
+        canvas.addEventListener('touchstart', (e) => {
+            e.preventDefault(); // ป้องกันการเลื่อนหน้าจอเวลาจิ้มกราฟ
+            handleCanvasClick(e);
+        }, { passive: false });
+
+        // ฟังก์ชันบันทึกใบงานเป็นรูปภาพ (PNG)
+        function saveAsImage() {
+            const btn = document.querySelector('button[onclick="saveAsImage()"]');
+            const originalContent = btn.innerHTML;
+            btn.innerHTML = '⏳ กำลังบันทึก...';
+            btn.classList.add('opacity-80', 'cursor-not-allowed');
+
+            // 1. นำค่าที่นักเรียนพิมพ์ ฝังลงไปใน Attribute เพื่อให้ html2canvas ตรวจจับข้อความได้
+            document.querySelectorAll('input').forEach(input => {
+                if (input.type === 'text' || input.type === 'number') {
+                    input.setAttribute('value', input.value);
+                }
+            });
+            document.querySelectorAll('textarea').forEach(textarea => {
+                textarea.innerHTML = textarea.value;
+            });
+
+            // 2. ซ่อนเครื่องมือชั่วคราว โดยใช้ opacity เพื่อไม่ให้ Layout เลื่อน (กราฟจะไม่เบี้ยว)
+            const noPrintElements = document.querySelectorAll('.no-print');
+            noPrintElements.forEach(el => {
+                // เก็บค่าเดิมไว้ก่อน
+                el.dataset.oldOpacity = el.style.opacity || '1'; 
+                el.style.opacity = '0';
+            });
+
+            // 3. หน่วงเวลาเล็กน้อย (100ms) เพื่อให้หน้าเว็บประมวลผลการซ่อนปุ่มให้เสร็จก่อนแคปภาพ
+            setTimeout(() => {
+                const container = document.querySelector('.print-container');
+                
+                html2canvas(container, {
+                    scale: 2, // เพิ่มความละเอียดภาพ x2 เพื่อความคมชัด
+                    backgroundColor: "#ffffff",
+                    logging: false,
+                    useCORS: true
+                }).then(canvasImage => {
+                    // คืนค่าปุ่มและเครื่องมือกลับมาแสดงเหมือนเดิม
+                    noPrintElements.forEach(el => el.style.opacity = el.dataset.oldOpacity);
+                    btn.innerHTML = originalContent;
+                    btn.classList.remove('opacity-80', 'cursor-not-allowed');
+
+                    try {
+                        // สร้างลิงก์จำลองสำหรับดาวน์โหลดไฟล์รูปภาพ
+                        const link = document.createElement('a');
+                        link.download = 'ใบงานสถิติ_Pixel_Art_Collector.png';
+                        link.href = canvasImage.toDataURL('image/png');
+                        
+                        // *** สำคัญมาก: ต้องนำลิงก์แปะลงในหน้าเว็บก่อน เบราว์เซอร์ถึงจะยอมให้คลิกดาวน์โหลด ***
+                        document.body.appendChild(link);
+                        link.click();
+                        document.body.removeChild(link); // โหลดเสร็จแล้วลบทิ้ง
+                    } catch (e) {
+                        console.error(e);
+                        alert("เบราว์เซอร์ของคุณบล็อกการดาวน์โหลดอัตโนมัติ กรุณาแคปหน้าจอด้วยตนเอง");
+                    }
+                }).catch(err => {
+                    console.error("เกิดข้อผิดพลาดในการบันทึกภาพ:", err);
+                    noPrintElements.forEach(el => el.style.opacity = el.dataset.oldOpacity);
+                    btn.innerHTML = originalContent;
+                    btn.classList.remove('opacity-80', 'cursor-not-allowed');
+                    alert("ไม่สามารถบันทึกรูปภาพได้ กรุณาลองใหม่อีกครั้ง");
+                });
+            }, 100);
+        }
+
+        // ฟังก์ชันซิงค์ข้อมูลจากตารางมาแสดงที่ป้ายแกน X ของกราฟ
+        function syncTableToGraph() {
+            // ดึงค่า ขอบล่าง ชั้นแรก ไปใส่จุดที่ 0
+            const l1 = document.getElementById('tb-lower-1');
+            const g0 = document.getElementById('graph-bound-0');
+            if (l1 && g0) g0.innerText = l1.value || '';
+
+            // ดึงค่า ขอบบน ชั้นที่ 1-5 ไปใส่จุดที่ 1-5
+            for (let i = 1; i <= 5; i++) {
+                const u = document.getElementById(`tb-upper-${i}`);
+                const g = document.getElementById(`graph-bound-${i}`);
+                if (u && g) g.innerText = u.value || '';
+            }
+        }
+
+        // เริ่มต้นการทำงานเมื่อหน้าเว็บโหลดเสร็จ
+        window.onload = () => {
+            initHistogram();
+            
+            // ติดตั้งระบบ: เมื่อพิมพ์ที่ตาราง (ช่องขอบล่าง/ขอบบน) ให้ไปโผล่ที่กราฟอัตโนมัติ
+            const tableInputs = document.querySelectorAll('input[id^="tb-lower-"], input[id^="tb-upper-"]');
+            tableInputs.forEach(input => {
+                input.addEventListener('input', syncTableToGraph);
+            });
+            
+            // อำนวยความสะดวก: เมื่อพิมพ์ "ขอบบน" ให้เติม "ขอบล่าง" ของชั้นถัดไปอัตโนมัติ
+            for(let i=1; i<5; i++) {
+                const currentUpper = document.getElementById(`tb-upper-${i}`);
+                const nextLower = document.getElementById(`tb-lower-${i+1}`);
+                if(currentUpper && nextLower) {
+                    currentUpper.addEventListener('input', (e) => {
+                        nextLower.value = e.target.value; // คัดลอกค่าไปชั้นถัดไป
+                        syncTableToGraph(); // ซิงค์กราฟใหม่
+                    });
+                }
+            }
+        };
+    </script>
+</body>
+</html>
